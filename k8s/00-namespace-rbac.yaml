@@ -1,0 +1,34 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: postgres-ha
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: patroni-sa
+  namespace: postgres-ha
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: patroni-role
+  namespace: postgres-ha
+rules:
+- apiGroups: [""]
+  resources: ["configmaps", "endpoints", "pods"]
+  verbs: ["create", "get", "list", "patch", "update", "watch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: patroni-rolebinding
+  namespace: postgres-ha
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: patroni-role
+subjects:
+- kind: ServiceAccount
+  name: patroni-sa
+  namespace: postgres-ha

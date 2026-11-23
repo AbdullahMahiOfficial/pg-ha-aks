@@ -1,0 +1,134 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: pg-ha-node
+  namespace: postgres-ha
+spec:
+  serviceName: pg-ha-headless
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      cluster-name: pg-ha-cluster
+  template:
+    metadata:
+      labels:
+        cluster-name: pg-ha-cluster
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8008"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: patroni-sa
+      securityContext:
+        fsGroup: 999
+      nodeSelector:
+        workload: postgres-ha
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: cluster-name
+                      operator: In
+                      values: ["pg-ha-cluster"]
+                topologyKey: topology.kubernetes.io/zone
+      containers:
+        - name: postgres-patroni
+          image: pghaprodacrvc4zxn.azurecr.io/pg-ha:16
+          imagePullPolicy: Always
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              mkdir -p /var/lib/postgresql/data/pgdata
+              chmod 0700 /var/lib/postgresql/data/pgdata
+              sed -e "s|\${POD_NAME}|${POD_NAME}|g" \
+                  -e "s|\${POD_IP}|${POD_IP}|g" \
+                  -e "s|\${SUPERUSER_PASSWORD}|${SUPERUSER_PASSWORD}|g" \
+                  -e "s|\${REPLICATION_PASSWORD}|${REPLICATION_PASSWORD}|g" \
+                  /etc/patroni/patroni.yml > /tmp/patroni.yml
+              exec patroni /tmp/patroni.yml
+          ports:
+            - name: postgresql
+              containerPort: 5432
+            - name: patroni
+              containerPort: 8008
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: SUPERUSER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pg-cluster-secrets
+                  key: SUPERUSER_PASSWORD
+            - name: REPLICATION_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pg-cluster-secrets
+                  key: REPLICATION_PASSWORD
+            - name: PGBACKREST_REPO1_AZURE_ACCOUNT
+              valueFrom:
+                secretKeyRef:
+                  name: pg-cluster-secrets
+                  key: AZURE_STORAGE_ACCOUNT
+            - name: PGBACKREST_REPO1_AZURE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: pg-cluster-secrets
+                  key: AZURE_STORAGE_KEY
+            - name: PGBACKREST_REPO1_AZURE_CONTAINER
+              valueFrom:
+                secretKeyRef:
+                  name: pg-cluster-secrets
+                  key: AZURE_STORAGE_CONTAINER
+          readinessProbe:
+            httpGet:
+              path: /readiness
+              port: 8008
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /liveness
+              port: 8008
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+            - name: patroni-config
+              mountPath: /etc/patroni
+            - name: pgbackrest-config
+              mountPath: /etc/pgbackrest
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: patroni-config
+          configMap:
+            name: patroni-config
+        - name: pgbackrest-config
+          configMap:
+            name: pgbackrest-config
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi
+  volumeClaimTemplates:
+    - metadata:
+        name: pgdata
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: managed-csi-premium
+        resources:
+          requests:
+            storage: 50Gi

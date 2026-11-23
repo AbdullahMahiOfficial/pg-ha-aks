@@ -1,0 +1,20 @@
+# Local state files
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.*.hcl
+
+# Crash & Log files
+crash.*
+crash.log
+*.log
+
+# Environment variables
+.env
+secret.txt
+
+# OS files
+.DS_Store
+Thumbs.db
+.env.local
+session-logs/

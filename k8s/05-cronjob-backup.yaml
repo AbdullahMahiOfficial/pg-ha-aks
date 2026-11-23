@@ -1,0 +1,49 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pgbackrest-full-backup
+  namespace: postgres-ha
+spec:
+  schedule: "0 2 * * 0"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: patroni-sa
+          restartPolicy: OnFailure
+          containers:
+            - name: backup-trigger
+              image: bitnami/kubectl:latest
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  PRIMARY_POD=$(kubectl get pods -n postgres-ha -l cluster-name=pg-ha-cluster,role=master -o jsonpath='{.items[0].metadata.name}')
+                  echo "Executing Full Backup on Primary: $PRIMARY_POD"
+                  kubectl exec -n postgres-ha "$PRIMARY_POD" -- pgbackrest --stanza=pg-ha --type=full backup
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pgbackrest-diff-backup
+  namespace: postgres-ha
+spec:
+  schedule: "0 2 * * 1-6"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: patroni-sa
+          restartPolicy: OnFailure
+          containers:
+            - name: backup-trigger
+              image: bitnami/kubectl:latest
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  PRIMARY_POD=$(kubectl get pods -n postgres-ha -l cluster-name=pg-ha-cluster,role=master -o jsonpath='{.items[0].metadata.name}')
+                  echo "Executing Differential Backup on Primary: $PRIMARY_POD"
+                  kubectl exec -n postgres-ha "$PRIMARY_POD" -- pgbackrest --stanza=pg-ha --type=diff backup
